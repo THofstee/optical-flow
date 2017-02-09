@@ -3,6 +3,8 @@ datasets
 
 ## Build directory
 build
+cuda-lk
+optical-flow
 
 ## CMake files
 CMakeCache.txt
