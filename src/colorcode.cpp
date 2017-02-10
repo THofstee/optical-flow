@@ -54,21 +54,21 @@ void computeColor(float fx, float fy, unsigned char* pix)
     if (ncols == 0)
 	makecolorwheel();
 
-    float rad = sqrt(fx * fx + fy * fy);
-    float a = atan2(-fy, -fx) / M_PI;
-    float fk = (a + 1.0) / 2.0 * (ncols-1);
+    float rad = (float)sqrt(fx * fx + fy * fy);
+    float a = (float)atan2(-fy, -fx) / (float)M_PI;
+    float fk = (a + 1.0f) / 2.0f * (ncols-1);
     int k0 = (int)fk;
     int k1 = (k0 + 1) % ncols;
     float f = fk - k0;
     //f = 0; // uncomment to see original color wheel
     for (int b = 0; b < 3; b++) {
-	float col0 = colorwheel[k0][b] / 255.0;
-	float col1 = colorwheel[k1][b] / 255.0;
+	float col0 = colorwheel[k0][b] / 255.0f;
+	float col1 = colorwheel[k1][b] / 255.0f;
 	float col = (1 - f) * col0 + f * col1;
 	if (rad <= 1)
 	    col = 1 - rad * (1 - col); // increase saturation with radius
 	else
-	    col *= .75; // out of range
-	pix[2 - b] = (int)(255.0 * col);
+	    col *= .75f; // out of range
+	pix[2 - b] = (int)(255.0f * col);
     }
 }

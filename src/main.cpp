@@ -203,10 +203,10 @@ int main(int argc, char** argv) {
 			float vx = out_frame[idx * 2 + 0];
 			float vy = out_frame[idx * 2 + 1];
 
-#define DEBUG_FRAME 1
+#define DEBUG_FRAME 0
 #if DEBUG_FRAME
-			write_frame[idx * 3 + 0] = (unsigned char)out_frame[idx * 2 + 0] * 255;
-			write_frame[idx * 3 + 1] = (unsigned char)out_frame[idx * 2 + 1] * 255;
+			write_frame[idx * 3 + 0] = (unsigned char)(out_frame[idx * 2 + 0] * 255);
+			write_frame[idx * 3 + 1] = (unsigned char)(out_frame[idx * 2 + 1] * 255);
 			write_frame[idx * 3 + 2] = 0;
 #else
 			// Check to make sure motion vector is reasonable

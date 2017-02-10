@@ -7,9 +7,10 @@
 // CUDA includes
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include "../include/helper_math.h"
 
-// cuBLAS includes
-#include "cublas_v2.h"
+//// cuBLAS includes
+//#include "cublas_v2.h"
 
 /**************************************************/
 
@@ -34,8 +35,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line)
 // MIPMAP GENERATION
 
 uint32_t getMipMapLevels(cudaExtent size) {
-	uint32_t res = static_cast<uint32_t>(1 + std::floor(std::log2(std::max({ size.width, size.height, size.depth }))));
-	return res;
+	return static_cast<uint32_t>(1 + std::floor(std::log2(std::max({ size.width, size.height, size.depth }))));
 }
 
 __global__ void d_mipmap(cudaSurfaceObject_t mipOutput, cudaTextureObject_t mipInput, unsigned int imageW, unsigned int imageH) {
@@ -51,26 +51,29 @@ __global__ void d_mipmap(cudaSurfaceObject_t mipOutput, cudaTextureObject_t mipI
 		// we are using the normalized access to make sure non-power-of-two textures
 		// behave well when downsized.
 
-		// Sample a 2x2 block next to current pixel
-		float color =
-			(tex2D<float>(mipInput, (x + 0) * px, (y + 0) * py)) +
-			(tex2D<float>(mipInput, (x + 1) * px, (y + 0) * py)) +
-			(tex2D<float>(mipInput, (x + 1) * px, (y + 1) * py)) +
-			(tex2D<float>(mipInput, (x + 0) * px, (y + 1) * py));
-		color /= 4.0;
-
-		// Sample weighted 3x3 block centered at current pixel
-		// This one seems to shift the image so I would avoid it
+		// Use hardware interpolation
 		//float color =
-		//	0.25   * (tex2D<float>(mipInput, (x + 0) * px, (y + 0) * py)) +
-		//	0.125  * (tex2D<float>(mipInput, (x + 1) * px, (y + 0) * py)) +
-		//	0.125  * (tex2D<float>(mipInput, (x + 0) * px, (y + 1) * py)) +
-		//	0.125  * (tex2D<float>(mipInput, (x + 0) * px, (y - 1) * py)) +
-		//	0.125  * (tex2D<float>(mipInput, (x - 1) * px, (y + 0) * py)) +
-		//	0.0625 * (tex2D<float>(mipInput, (x + 1) * px, (y + 1) * py)) +
-		//	0.0625 * (tex2D<float>(mipInput, (x + 1) * px, (y - 1) * py)) +
-		//	0.0625 * (tex2D<float>(mipInput, (x - 1) * px, (y + 1) * py)) +
-		//	0.0625 * (tex2D<float>(mipInput, (x - 1) * px, (y - 1) * py));
+		//	(tex2D<float>(mipInput, (x + 0.5) * px, (y + 0.5) * py));
+
+		// Sample a 2x2 block next to current pixel
+		//float color =
+		//	(tex2D<float>(mipInput, (x + 0) * px, (y + 0) * py)) +
+		//	(tex2D<float>(mipInput, (x + 1) * px, (y + 0) * py)) +
+		//	(tex2D<float>(mipInput, (x + 1) * px, (y + 1) * py)) +
+		//	(tex2D<float>(mipInput, (x + 0) * px, (y + 1) * py));
+		//color /= 4.0;
+
+		// As defined in the Pyramidal-LK paper
+		float color =
+			(tex2D<float>(mipInput, (x + 0) * px, (y + 0) * py)) / 4.0 +
+			(tex2D<float>(mipInput, (x - 1) * px, (y + 0) * py)) / 8.0 +
+			(tex2D<float>(mipInput, (x + 1) * px, (y + 0) * py)) / 8.0 +
+			(tex2D<float>(mipInput, (x + 0) * px, (y - 1) * py)) / 8.0 +
+			(tex2D<float>(mipInput, (x + 0) * px, (y + 1) * py)) / 8.0 +
+			(tex2D<float>(mipInput, (x - 1) * px, (y - 1) * py)) / 16.0 +
+			(tex2D<float>(mipInput, (x + 1) * px, (y + 1) * py)) / 16.0 +
+			(tex2D<float>(mipInput, (x - 1) * px, (y + 1) * py)) / 16.0 +
+			(tex2D<float>(mipInput, (x + 1) * px, (y - 1) * py)) / 16.0;
 
 		color = min(color, 1.0);
 
@@ -86,10 +89,8 @@ void generateMipMaps(cudaMipmappedArray_t mipmapArray, cudaExtent extent) {
 
 	while (width != 1 || height != 1)
 	{
-		width /= 2;
-		width = std::max((size_t)1, width);
-		height /= 2;
-		height = std::max((size_t)1, height);
+		width = std::max((size_t)1, width/2);
+		height = std::max((size_t)1, height/2);
 
 		cudaArray_t levelFrom;
 		CUDA_CALL(cudaGetMipmappedArrayLevel(&levelFrom, mipmapArray, level));
@@ -169,8 +170,8 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 {
 	int windowSize = 5;
 
-	float px = 1.0 / float(width);
-	float py = 1.0 / float(height);
+	float px = 1.0 / float(width >> level);
+	float py = 1.0 / float(height >> level);
 
 	unsigned int x = (blockIdx.x * blockDim.x + threadIdx.x);
 	unsigned int y = (blockIdx.y * blockDim.y + threadIdx.y);
@@ -178,11 +179,6 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 
 	float x0 = x >> level;
 	float y0 = y >> level;
-
-	result[idx * 2 + 0] = tex2DLod<float>(frame0, (x0) * px, (y0) * py, level);
-	result[idx * 2 + 1] = tex2DLod<float>(frame1, (x0) * px, (y0) * py, level);
-
-	return;
 
 	if (x > width - 1 || y > height - 1) return;
 
@@ -192,8 +188,6 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 	float sum_Ixy = 0.0f;
 	float sum_Iyy = 0.0f;
 	float Ix, Iy, It; // Image gradients
-
-	level = 0;
 
 	// Calculate spatial gradient
 	for (int yy = -windowSize; yy <= windowSize; yy++) {
@@ -209,7 +203,12 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 
 	det = sum_Ixx*sum_Iyy - sum_Ixy*sum_Ixy;
 
-	if (det < 0.00001f) return;
+	//// Output the raw mipmap level
+	//result[idx * 2 + 0] = tex2DLod<float>(frame0, x0*px, y0*py, level);
+	//result[idx * 2 + 1] = tex2DLod<float>(frame1, x0*px, y0*py, level);
+	//return;
+
+	if (det < 0.000001f) return;
 
 	D = 1 / det;
 
@@ -263,8 +262,8 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 		Vy += Vy;
 	}
 
-	result[idx * 2 + 0] = I;// Vx;
-	result[idx * 2 + 1] = J;// Vy;
+	result[idx * 2 + 0] = Vx;
+	result[idx * 2 + 1] = Vy;
 }
 
 float* cuda_lucaskanade(float* frame0, float* frame1, int w, int h) {
@@ -341,13 +340,12 @@ float* cuda_lucaskanade(float* frame0, float* frame1, int w, int h) {
 		// Launch the kernel
 		dim3 blockSize(16, 16, 1);
 		dim3 gridSize(((unsigned int)w + blockSize.x - 1) / blockSize.x, ((unsigned int)h + blockSize.y - 1) / blockSize.y, 1);
-		//for (int l = getMipMapLevels(imageExtent) - 1; l >= 0; l--) {
-		//	lkKernel<<<gridSize, blockSize>>>(d_result, d_tex0, d_tex1, std::max(w>>l,1), std::max(h>>l,1), l);
-		//	cudaThreadSynchronize();
-		//}
-		int l = 0;
-		lkKernel << <gridSize, blockSize >> >(d_result, d_tex0, d_tex1, std::max(w >> l, 1), std::max(h >> l, 1), l);
-		cudaThreadSynchronize();
+		uint32_t maxLevel = 5;
+		for (int l = std::min(maxLevel, getMipMapLevels(imageExtent) - 1); l >= 0; l--) {
+			lkKernel<<<gridSize, blockSize>>>(d_result, d_tex0, d_tex1, w, h, l);
+			cudaThreadSynchronize();
+		}
+		CUDA_CALL(cudaThreadSynchronize());
 		CUDA_CALL(cudaPeekAtLastError());
 
 		// Wait for kernel to finish
