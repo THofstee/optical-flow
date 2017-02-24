@@ -169,6 +169,9 @@ void setImageData(cudaMipmappedArray_t mipmapArray, float* src, cudaExtent exten
 __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureObject_t frame1, const int width, const int height, int level)
 {
 	int windowSize = 5;
+	
+	//int temp = level;
+	//level = 0;
 
 	float px = 1.0 / float(width >> level);
 	float py = 1.0 / float(height >> level);
@@ -181,6 +184,8 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 	float y0 = y >> level;
 
 	if (x > width - 1 || y > height - 1) return;
+
+	//level = temp;
 
 	float det, D;
 
@@ -203,11 +208,6 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 
 	det = sum_Ixx*sum_Iyy - sum_Ixy*sum_Ixy;
 
-	//// Output the raw mipmap level
-	//result[idx * 2 + 0] = tex2DLod<float>(frame0, x0*px, y0*py, level);
-	//result[idx * 2 + 1] = tex2DLod<float>(frame1, x0*px, y0*py, level);
-	//return;
-
 	if (det < 0.000001f) return;
 
 	D = 1 / det;
@@ -216,8 +216,8 @@ __global__ void lkKernel(float* result, cudaTextureObject_t frame0, cudaTextureO
 	float Vx = result[idx * 2 + 0];
 	float Vy = result[idx * 2 + 1];
 
-	float x1 = x + Vx;
-	float y1 = y + Vy;
+	float x1 = x0 + Vx;
+	float y1 = y0 + Vy;
 
 	float I, J;
 
